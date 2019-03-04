@@ -1,0 +1,12 @@
+*.swp
+__pycache__
+*.pyc
+*.tfrecord
+model*
+CampusLoopDataset
+*npy
+slurm_log
+plots
+kitti_*.txt
+calc_model
+calc_env
