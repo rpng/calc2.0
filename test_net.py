@@ -380,56 +380,68 @@ def find_best_checkpoint(model_dir, data_path, num_include=5):
     print("checkpoint:", best_cp, ", AUC =", best_auc)
     print("Reg checkpoint:", best_cp_reg, ", AUC =", best_auc_reg)
 
-def show_local_descr(model_dir, im_fls, cls):
+def show_local_descr(model_dir, im_fls, train_dirs, cls):
     vh = calc2.vh
     vw = calc2.vw
     im_fls = im_fls.split(',')
     assert len(im_fls)==3
-    import pycuda.autoinit
-    import pycuda.gpuarray as gpuarray
-    import skcuda.linalg as linalg
-    from skcuda.linalg import PCA as cuPCA
-    import skcuda.misc as cumisc
+    
+    train_fls = []
+    for i in range(len(train_dirs)):
+        for f in listdir(train_dirs[i]): 
+            train_fls.append(path.join(train_dirs[i], f))
+
+    from sklearn.decomposition import KernelPCA as PCA
     import matplotlib.patches as mpatches
 
     N = 2
+
+    train_ims = np.empty((len(train_fls),vh,vw,3), dtype=np.float32)
+    for i in range(len(train_fls)):
+        train_ims[i] = cv2.cvtColor(cv2.resize(cv2.imread(train_fls[i]), (vw,vh)), 
+                    cv2.COLOR_BGR2RGB) / 255.
+
     ims = np.empty((3,vh,vw,3), dtype=np.float32)
     for i in range(len(im_fls)):
         ims[i] = cv2.cvtColor(cv2.resize(cv2.imread(im_fls[i]), (vw,vh)), 
                     cv2.COLOR_BGR2RGB) / 255.
+
     with tf.Session() as sess:
         calc = utils.CALC2(model_dir, sess)
-        d = calc.run(ims).reshape((3,vh//16*vw//16,4*(1+len(calc_classes.keys()))))
-        didx = 4*(1+calc_classes[cls[0]])
-        d_cls = d[:, :, didx:didx+4].reshape(3,-1)
-        didx2 = 4*(1+calc_classes[cls[1]])
-        d_cls2 = d[:, :, didx2:didx2+4].reshape(3,-1)
-        d_app = d[:, :, :4].reshape(3,-1)
         
-    pca = cuPCA(N)
-    dcls_gpu = gpuarray.GPUArray(d_cls.shape, np.float32, order="F")
-    dcls_gpu.set(d_cls) # copy data to gpu
-    dcc1 = pca.fit_transform(dcls_gpu).get() # calculate the principal components
+        d_train = calc.run(train_ims).reshape((len(train_fls),
+                            vh//16*vw//16,4*(1+len(calc_classes.keys()))))
+        # Each class has 4 local descriptors
+        didx = 4*(1+calc_classes[cls[0]])
+        d_cls_train = d_train[:, :, didx:didx+4].reshape(4*len(train_fls),-1)
+        didx2 = 4*(1+calc_classes[cls[1]])
+        d_cls2_train = d_train[:, :, didx2:didx2+4].reshape(4*len(train_fls),-1)
+        d_app_train = d_train[:, :, :4].reshape(4*len(train_fls),-1)
+
+        d = calc.run(ims).reshape((3,vh//16*vw//16,4*(1+len(calc_classes.keys()))))
+
+        # Now just take the first local descriptor
+        d_cls = d[:, :, didx:didx+1].reshape(3,-1)
+        d_cls2 = d[:, :, didx2:didx2+1].reshape(3,-1)
+        d_app = d[:, :, :1].reshape(3,-1)
+        
+    pca = PCA(N)
+    pca.fit(d_cls_train)
+    dcc1 = pca.transform(d_cls) # calculate the principal components
     dcc1 = dcc1 / np.linalg.norm(dcc1, axis=-1)[...,np.newaxis]    
 
-    dcls2_gpu = gpuarray.GPUArray(d_cls.shape, np.float32, order="F")
-    dcls2_gpu.set(d_cls2) # copy data to gpu
-    dcc2 = pca.fit_transform(dcls2_gpu).get() # calculate the principal components
+    pca.fit(d_cls2_train)
+    dcc2 = pca.transform(d_cls2) # calculate the principal components
     dcc2 = dcc2 / np.linalg.norm(dcc2, axis=-1)[...,np.newaxis]    
     
-    dapp_gpu = gpuarray.GPUArray(d_cls.shape, np.float32, order="F")
-    dapp_gpu.set(d_app) # copy data to gpu
-    dac = pca.fit_transform(dapp_gpu).get() # calculate the principal components
+    pca.fit(d_app_train)
+    dac = pca.transform(d_app) # calculate the principal components
     dac = dac / np.linalg.norm(dac, axis=-1)[...,np.newaxis]    
     
     minx = -1.1 #min(np.min(dac[:,0]), np.min(dcc1[:,0]))-.1
     maxx = 1.1 # max(np.max(dac[:,0]), np.max(dcc1[:,0]))+.1
     miny = -1.1 #min(np.min(dac[:,1]), np.min(dcc1[:,1]))-.1
     maxy = 1.1 #max(np.max(dac[:,1]), np.max(dcc1[:,1]))+.1
-    '''
-    minz = min(np.min(dac[:,2]), np.min(dcc[:,2]))
-    maxz = max(np.max(dac[:,2]), np.max(dcc[:,2]))
-    '''
     x = np.zeros_like(dac[:,0])
     
     rcParams['font.sans-serif'] = 'DejaVu Sans'
@@ -479,7 +491,8 @@ def show_local_descr(model_dir, im_fls, cls):
 if __name__=='__main__':
     
     show_local_descr('model',
-         'dataset/CampusLoopDataset/memory/Image091.jpg,' + \
-         'dataset/CampusLoopDataset/live/Image091.jpg,' + \
+         'dataset/CampusLoopDataset/memory/Image092.jpg,' + \
+         'dataset/CampusLoopDataset/live/Image090.jpg,' + \
          'dataset/CampusLoopDataset/live/Image037.jpg',
-         ['wall', 'other'])
+         ["dataset/CampusLoopDataset/memory", "dataset/CampusLoopDataset/live"],
+         ['wall', 'structure-other'])
