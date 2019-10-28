@@ -122,6 +122,6 @@ tf2-kdl==0.5.18
 tf2-py==0.5.18
 tf2-ros==0.5.18
 topic-tools==1.12.14
-Werkzeug==0.14.1
+Werkzeug==0.15.3
 wiimote==1.11.0
 xacro==1.11.3
